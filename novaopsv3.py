@@ -1,4 +1,7 @@
 #!/usr/bin/env python
+import argparse
+import sys
+
 from keystoneauth1.identity import v3
 from keystoneauth1 import session
 from keystoneclient.v3 import client
@@ -10,6 +13,22 @@ import pprint
 import json
 #dont forget to source admin-openrch.sh file into env variables
 
+
+parser = argparse.ArgumentParser(description='Description of your program')
+parser.add_argument('-l','--list', action='store_true', help='This Option will only write the List of Hosts', required=False)
+#parser.add_argument('-az','--availabilityzone', help='Enter AZ Name here to filter Hosts by that particular AZ', required=False)
+parser.add_argument('-ag','--aggregate', help='Enter Aggregate ID (Integer) here to filter Hosts by that particular Host Aggregate', required=False)
+args = vars(parser.parse_args())
+
+# if len(args['availabilityzone']).keys > 1:
+	# print ("Availability Zone Filter only accepts one Parameter")
+	# sys.exit()
+
+# if len(args['aggregate']).keys > 1:
+	# print ("Aggregate Filter only accepts one Parameter")
+	# sys.exit()
+		
+
 USERNAME= os.environ['OS_USERNAME']
 PASSWORD = os.environ['OS_PASSWORD']
 AUTH_URL = os.environ['OS_AUTH_URL']
@@ -17,12 +36,35 @@ PROJECT_NAME = os.environ['OS_PROJECT_NAME']
 VERSION = '2.30' #nova api version
 logging.basicConfig(filename='novaops.log', level=logging.DEBUG, format='%(asctime)s %(message)s')
 
-
-
 auth = v3.Password(auth_url=AUTH_URL,username=USERNAME,password=PASSWORD,project_name='demo',user_domain_id='default',project_domain_id='default')
-
 sess = session.Session(auth=auth)
 nova = client.Client(VERSION, session=sess)
+
+
+
+
+
+
+
+def GetAggregates():
+	AggregatesArray = []
+	for aggregate in nova.aggregates.list():
+		AggregatesArray.append(aggregate.id)
+	return AggregatesArray
+
+def GetHostsInAggregate(aggregate):	
+	HostsInAggregatesArray = []		
+	for index in getattr(nova.aggregates.get_details(aggregate), 'hosts'):
+		HostsInAggregatesArray.append(index)
+	return HostsInAggregatesArray
+
+	
+	
+print(GetHostsInAggregate('1'))
+
+
+
+
 
 
 
@@ -30,7 +72,7 @@ def GetServers():
 	unsorted_hostlist = []
 	hostlist = defaultdict(list)		
 	for server in nova.servers.list(search_opts={'all_tenants': 1}):
-		unsorted_hostlist.append([getattr(server, 'OS-EXT-SRV-ATTR:host', ''),server.id])	
+		unsorted_hostlist.append([getattr(server, 'OS-EXT-SRV-ATTR:host', ''),server.id])	#OS-EXT-AZ:availability_zone
 	
 	for host, serverid in unsorted_hostlist:
 			hostlist[host].append(serverid)	
@@ -120,7 +162,7 @@ def ops():
 
 #preflight()
 #hostparser()
-ops()
+#ops()
 
 
 
