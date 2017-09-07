@@ -141,12 +141,14 @@ def migrateAction(vmid):
 def enablehostmaintenance(host):
     nova.services.disable(host=host, binary="nova-compute")
     print('disabled nova-compute service on '+host)
+    time.sleep(15)
     return
 
 
 def disablehostmaintenance(host):
     nova.services.enable(host=host, binary="nova-compute")
     print('enabled nova-compute service on '+host)
+    time.sleep(15)
     return
 
 
@@ -175,6 +177,7 @@ def livemigrateallserversonhost(host):
     for server in GetServers(host):
         migrateAction(server)
         print('Migrating Server '+server+' off '+host)
+        time.sleep(5)
 
 
 def checkHostEmpty(host):
@@ -204,7 +207,7 @@ def checkhostcompletion(host):
         print(host + ' was evacuated successfully')
         return 1
     else:   
-        host_timeout_counter = time.time()+LIVE_MIGRATION_TIMEOUT * len(GetServers(host))
+        host_timeout_counter = time.time()+LIVE_MIGRATION_TIMEOUT * len(GetServers(host)) * 2
         timeout_counter = time.time()+LIVE_MIGRATION_TIMEOUT
         time.sleep(15)
         
