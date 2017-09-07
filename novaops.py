@@ -40,14 +40,6 @@ parser.add_argument('-w', '--workers',
 args = parser.parse_args()
 argsdict = vars(args)
 
-# if len(argsdict['availabilityzone']).keys > 1:
-# print ("Availability Zone Filter only accepts one Parameter")
-# sys.exit()
-
-# if len(argsdict['aggregate']).keys > 1:
-# print ("Aggregate Filter only accepts one Parameter")
-# sys.exit()
-
 
 USERNAME = os.environ['OS_USERNAME']
 PASSWORD = os.environ['OS_PASSWORD']
@@ -61,8 +53,8 @@ auth = v3.Password(auth_url=AUTH_URL, username=USERNAME, password=PASSWORD, proj
 sess = session.Session(auth=auth)
 nova = client.Client(VERSION, session=sess)
 
-LIVE_MIGRATION_TIMEOUT = 180
 
+LIVE_MIGRATION_TIMEOUT = 180
 live_migration_abort_submitted = {}
 
 
@@ -87,7 +79,7 @@ def GetHostsInAggregate(aggregate):
 
 def GetServers(Host):
     ServerArray = []
-    for server in nova.servers.list(search_opts={'all_tenants': 1, 'host': Host}):
+    for server in nova.servers.list(search_opts={'all_tenants': 1, 'host': Host, 'status': 'ACTIVE'}):
         ServerArray.append(server.id)
     return ServerArray
 
@@ -126,6 +118,7 @@ def getworkercount():
 
 def rebootHost(host):
     # nova.hosts.host_action.reboot(host) not possible anymore because these low level actions have been removed from compute service, instead reboot via ssh
+    #paramiko also supports SSH with Key Certificates. See paramiko documentation for this.
     print('Rebooting Host:'+host)
     sshusername = 'stack'
     sshpassword = 'devstack'
@@ -133,7 +126,6 @@ def rebootHost(host):
     ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
     ssh.connect(host, 22, username=sshusername, password=sshpassword, timeout=20)
     try:
-        # ssh.exec_command("/sbin/reboot -f > /dev/null 2>&1 &")
         ssh.exec_command('sudo reboot')
     except AuthenticationException as e:
         e = str(e)
@@ -172,7 +164,6 @@ def checkHostBusyMigrating(host):
 
 
 def appendNotMigratedServers(host):
-    # ServerListToWrite = []
     loglist = open("notmigrated.txt", "a")
     for server in remove_duplicates(GetServers(host)):
         loglist.write(host + ':\t' + server + '\t' + str(datetime.now()) + '\n')
@@ -243,8 +234,6 @@ def worker(host):
     disablehostmaintenance(host)
     return 1
 
-
-# http://chriskiehl.com/article/parallelism-in-one-line/
 
 def WorkerPool():
     pool_size = getworkercount()
