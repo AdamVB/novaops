@@ -1,4 +1,5 @@
 #!/usr/bin/env python
+from __future__ import division
 import argparse
 import sys
 import math
@@ -6,6 +7,8 @@ import threading
 import time
 from datetime import datetime
 from multiprocessing.dummy import Pool as ThreadPool
+
+
 import functools
 print = functools.partial(print, flush=True) #So Printoutput isn't buffered but flushed when invoked
 
@@ -18,7 +21,6 @@ from collections import defaultdict
 import os
 import logging
 import pprint
-import json
 import paramiko
 
 # dont forget to source admin-openrc.sh file into env variables
@@ -54,7 +56,7 @@ sess = session.Session(auth=auth)
 nova = client.Client(VERSION, session=sess)
 
 
-LIVE_MIGRATION_TIMEOUT = 180
+live_migration_completion_timeout = 800 #this needs to be the same value as live_migration_completion_timeout in your nova.conf on the compute nodes
 live_migration_abort_submitted = {}
 
 
@@ -135,8 +137,12 @@ def rebootHost(host):
 
 
 def migrateAction(vmid):
-    nova.servers.live_migrate(block_migration='auto', server=vmid, host=None)
-
+    try:
+        nova.servers.live_migrate(block_migration='auto', server=vmid, host=None)
+    except:
+        print('could net send migration request to nova for server: ' +vmid + '  -> after all migrations on this host are completed, this will be logged to notmigrated.txt' )
+        pass
+        
 
 def enablehostmaintenance(host):
     nova.services.disable(host=host, binary="nova-compute")
@@ -150,7 +156,20 @@ def disablehostmaintenance(host):
     print('enabled nova-compute service on '+host)
     time.sleep(15)
     return
-
+    
+ 
+def calcHostTimeout(host):
+    memory_mb = nova.hosts.get(host)[1].memory_mb
+    disk_gb = nova.hosts.get(host)[1].disk_gb
+    timeout = ((memory_mb*0.000931323) + (disk_gb*0.931323)) * live_migration_completion_timeout #0.000931323 is the factor from Megabyte to Gibibyte, The timeout is calculated based on the instance size, which is the instance's memory size in GiB. In the case of block migration, the size of ephemeral storage in GiB is added. The timeout in seconds is the instance size multiplied by the configurable parameter live_migration_completion_timeout, whose default is 800. For example, shared-storage live migration of an instance with 8GiB memory will time out after 6400 seconds. 
+    return timeout
+    
+def calcProcessTime():
+    time = 0
+    for host in hostparser():
+        time += calcHostTimeout(host)
+    time = time/60/60/getworkercount()
+    return time
 
 def checkHostBusyMigrating(host):
     if len(nova.servers.list(search_opts={'all_tenants': 1, 'host': host, 'status': 'MIGRATING'})) > 0:
@@ -172,7 +191,6 @@ def appendNotMigratedServers(host):
         print(server+ ' might remain on '+host)
     loglist.close()
 
-
 def livemigrateallserversonhost(host):
     for server in GetServers(host):
         migrateAction(server)
@@ -193,7 +211,7 @@ def livemigrationcleanup(host):
             if not server in live_migration_abort_submitted:
                 live_migration_abort_submitted[server]=migration
                 try:
-                    print('Migration Timeout -> try abort' + str(migration) +' for server: ' + server)
+                    print('Migration Timeout  -> try abort' + str(migration) +' for server: ' + server)
                     nova.server_migrations.live_migration_abort(server, migration)                    
                     print('migration abort submitted to nova for: '+server)             
                 except:
@@ -207,27 +225,28 @@ def checkhostcompletion(host):
         print(host + ' was evacuated successfully')
         return 1
     else:   
-        host_timeout_counter = time.time()+LIVE_MIGRATION_TIMEOUT * len(GetServers(host)) * 2
-        timeout_counter = time.time()+LIVE_MIGRATION_TIMEOUT
+        host_timeout_counter = time.time()+calcHostTimeout(host)
         time.sleep(15)
         
         while checkHostBusyMigrating(host):
             print(host + ' not empty, waiting for migrations to complete...')
             time.sleep(30)            
-            if time.time() > timeout_counter:
-                livemigrationcleanup(host)                
-                timeout_counter = time.time()+LIVE_MIGRATION_TIMEOUT
-                if time.time() > host_timeout_counter:
-                    break
+            if time.time() > host_timeout_counter:
+                livemigrationcleanup(host)
+                break
+
                     
     if checkHostEmpty(host):
         print(host + ' was evacuated successfully')
         # rebootHost(host)						#marked out for testing purposes#####################################
+        #time.sleep(60) #wait for reboot
         return 1
     else:
         appendNotMigratedServers(host)
         print(host + ' was NOT evacuated successfully')
         return 0
+        
+        
 
 
 def worker(host):
@@ -240,7 +259,7 @@ def worker(host):
 
 def WorkerPool():
     pool_size = getworkercount()
-    pool = ThreadPool(pool_size)
+    pool = ThreadPool(pool_size) 
     print('Starting Worker Pool with '+ str(pool_size) +' workers')
     results = pool.map(worker, hostparser())
     pool.close()
@@ -254,5 +273,5 @@ if (args.list):
     else:
         print("hostlist.txt was written Aggregate ID Filter:" + argsdict['aggregate'])
 else:
-    WorkerPool()
-
+    print('This Process will take a maximum of '+str(calcProcessTime())+' hours')
+    #WorkerPool()
