@@ -1,18 +1,10 @@
 #!/usr/bin/env python
-from __future__ import division
 import argparse
-import sys
 import math
-import threading
 import time
 from datetime import datetime
 from multiprocessing.dummy import Pool as ThreadPool
-
-
 import functools
-print = functools.partial(print, flush=True) #So Printoutput isn't buffered but flushed when invoked
-
-
 from keystoneauth1.identity import v3
 from keystoneauth1 import session
 from keystoneclient.v3 import client
@@ -20,9 +12,8 @@ from novaclient import client
 from collections import defaultdict
 import os
 import logging
-import pprint
 import paramiko
-
+print = functools.partial(print, flush=True) #So Printoutput isn't buffered but flushed when invoked
 # dont forget to source admin-openrc.sh file into env variables
 
 
@@ -31,25 +22,21 @@ parser = argparse.ArgumentParser(
 parser.add_argument('-l', '--list', action='store_true',
                     help='This Option will only write the List of Hosts and not do any Server Operations',
                     required=False)
-# parser.add_argument('-az','--availabilityzone', help='Enter AZ Name here to filter Hosts by that particular AZ', required=False)
 parser.add_argument('-ag', '--aggregate',
                     help='Enter Aggregate ID (Integer) here to filter Hosts by that particular Host Aggregate',
                     required=False, type=int)
 parser.add_argument('-w', '--workers',
                     help='Enter Number of concurrent workers that the Program should use. The Number of workers is how many servers will be live evacuated at once. ',
                     required=False, type=int)
-
 args = parser.parse_args()
 argsdict = vars(args)
 
-
+logging.basicConfig(filename='novaops.log', level=logging.DEBUG, format='%(asctime)s %(message)s')
 USERNAME = os.environ['OS_USERNAME']
 PASSWORD = os.environ['OS_PASSWORD']
 AUTH_URL = os.environ['OS_AUTH_URL']
 PROJECT_NAME = os.environ['OS_PROJECT_NAME']
 VERSION = '2.30'  # nova api version
-logging.basicConfig(filename='novaops.log', level=logging.DEBUG, format='%(asctime)s %(message)s')
-
 auth = v3.Password(auth_url=AUTH_URL, username=USERNAME, password=PASSWORD, project_name=PROJECT_NAME,
                    user_domain_id='default', project_domain_id='default')
 sess = session.Session(auth=auth)
@@ -109,15 +96,13 @@ def WriteHosts(aggregate):
         for a in GetAggregates():
             for h in GetHostsInAggregate(a):
                 HostListToWrite.append(h)
-
     else:
         for h in GetHostsInAggregate(aggregate):
             HostListToWrite.append(h)
-
-    loglist = open("hostlist.txt", "w")
+    hostlist = open("hostlist.txt", "w")
     for host in remove_duplicates(HostListToWrite):
-        loglist.write(host + '\n')
-    loglist.close()
+        hostlist.write(host + '\n')
+    hostlist.close()
 
 
 def HostParser():
@@ -319,8 +304,11 @@ def LiveMigrationCleanup(host):
 
 def CheckHostCompletion(host):
     if CheckHostEmpty(host):
-        print(host + ' was evacuated successfully')
-        return 1
+        print(host + ' is already empty')
+        RebootHost(host)						
+        while not CheckHostUp(host): 
+            time.sleep(15)
+        return 1        
     else:   
         host_timeout_counter = time.time()+CalcHostTimeout(host)
         time.sleep(15)
@@ -330,21 +318,17 @@ def CheckHostCompletion(host):
             time.sleep(30)            
             if time.time() > host_timeout_counter:
                 LiveMigrationCleanup(host)
-                break
-
-                    
+                break                    
     if CheckHostEmpty(host):
         print(host + ' was evacuated successfully')
-        # RebootHost(host)						#marked out for testing purposes#####################################
-        while not CheckHostUp(host): #check if host has rebooted
+        RebootHost(host)						
+        while not CheckHostUp(host): 
             time.sleep(15)
         return 1
     else:
         AppendNotMigratedServers(host)
         print(host + ' was NOT evacuated successfully')
-        return 0
-        
-        
+        return 0             
 
 
 def Worker(host):
